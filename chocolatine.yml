@@ -1,0 +1,82 @@
+name: Chocolatine
+
+on:
+  push:
+    branches-ignore:
+      - 'ga-ignore-*'
+  pull_request:
+    branches-ignore:
+      - 'ga-ignore-*'
+
+env:
+  EXECUTABLES: "test:test2"
+
+jobs:
+  check_program_compilation:
+    runs-on: ubuntu-latest
+    container:
+      image: jdktek/epitest-w-raylib
+    steps:
+        - name: Checkout Code
+          uses: actions/checkout@v3
+
+        - name: Check Program Compilation
+          run: |
+            timeout 20 make
+            make clean
+            IFS=:
+            for executable in $EXECUTABLES; do
+                if [ ! -f "$executable" ]; then
+                    echo "::error title=Build Failed::After the build, impossible to find this executable: $executable"
+                    exit 1
+                fi
+            done
+  
+  check_coding_style:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/epitech/coding-style-checker:latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+    
+      - name: Check Coding-Style Errors
+        run: |
+          check.sh $(pwd) $(pwd)
+          error=$(stat --format=%s coding-style-reports.log)
+          if (($error > 0)) then
+          while IFS=: read -r file line lvl error
+          do
+            if [[ "$file" != *"src/gui"* ]]; then
+              echo "::error title=${lvl} coding style error,file=${file},#line=${line}::${error}"
+            fi
+          done < "coding-style-reports.log"
+          exit 1
+          fi
+
+  run_tests:
+    runs-on: ubuntu-latest
+    needs: [check_coding_style]
+    container:
+      image: epitechcontent/epitest-docker
+    timeout-minutes: 2
+    steps:
+        - uses: actions/checkout@v3
+        - name: test-run
+          run: |
+            make tests_run -s
+            make fclean
+
+  push_to_mirror:
+    runs-on: ubuntu-latest
+    needs: [run_tests]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: pixta-dev/repository-mirroring-action@v1
+        with:
+          target_repo_url:
+            ${{env.MIRROR_URL}}
+          ssh_private_key:
+            ${{secrets.GIT_SSH_PRIVATE_KEY}}
